@@ -9,7 +9,8 @@
   body { margin:0; background:#111; font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; color:#eee; }
   header { padding:14px 16px; font-size:14px; opacity:.75; border-bottom:1px solid #222; }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:6px; padding:6px; }
-  .grid img { width:100%; height:auto; display:block; background:#222; cursor:zoom-in; border-radius:4px; }
+  .grid img { width:100%; height:auto; display:block; background:#222; cursor:zoom-in; border-radius:4px; min-height:140px; }
+  .grid img.fail { background:#522; opacity:.4; }
   #lb { position:fixed; inset:0; background:rgba(0,0,0,.95); display:none; align-items:center; justify-content:center; z-index:10; padding:12px; }
   #lb.open { display:flex; }
   #lb img { max-width:100%; max-height:100%; border-radius:4px; }
@@ -21,35 +22,50 @@
 <div class="grid" id="grid"></div>
 <div id="lb" onclick="this.classList.remove('open')"><img alt=""></div>
 <script>
-  // 퀵스타 이미지 URL 패턴:
-  //   https://quickstar.co.kr/data/member/{folder}/{user}_{ID부분}.jpg
-  // fragment 형식: ?u=user&f=folder#id1,id2,...
-  //   - u, f 생략 시 기본값(아래 DEFAULT_*) 사용
-  const DEFAULT_USER   = "handuscorp2";
-  const DEFAULT_FOLDER = "ha";
-  const BASE = "https://quickstar.co.kr/data/member/";
+  // URL 형식 (v3):
+  //   ?u=USER[,ALT_USER...]&f=FOLDER&it=IT_CODE#group0[;group1...]
+  //     - group i 의 아이템들은 user[i] 사용 (없으면 user[0])
+  //     - 각 아이템이 숫자만(\d+)이고 it 가 있으면 → {user}_{it}_{id}.jpg
+  //     - 그 외(input_xxx, IT_xxx 등) → {user}_{id}.jpg
+  // 기존 형식(?u=USER&f=FOLDER#id1,id2)도 그대로 동작.
 
-  const url   = new URL(location.href);
-  const user  = url.searchParams.get("u") || DEFAULT_USER;
-  const fold  = url.searchParams.get("f") || DEFAULT_FOLDER;
-  const raw   = decodeURIComponent(location.hash.slice(1));
-  const ids   = raw ? raw.split(",").map(s => s.trim()).filter(Boolean) : [];
+  const BASE = "https://quickstar.co.kr/data/member/";
+  const url = new URL(location.href);
+  const users  = (url.searchParams.get("u") || "handuscorp2").split(",").map(s => s.trim()).filter(Boolean);
+  const folder = url.searchParams.get("f") || "ha";
+  const itCode = url.searchParams.get("it") || "";
+  const rawHash = decodeURIComponent(location.hash.slice(1));
+  const groups = rawHash ? rawHash.split(";") : [];
+
+  const specs = [];
+  groups.forEach((g, gi) => {
+    const u = users[gi] || users[0];
+    g.split(",").map(s => s.trim()).filter(Boolean).forEach(id => {
+      let filename;
+      if (/^\d+$/.test(id) && itCode) {
+        filename = u + "_" + itCode + "_" + id + ".jpg";
+      } else {
+        filename = u + "_" + id + ".jpg";
+      }
+      specs.push({ src: BASE + folder + "/" + filename, label: id });
+    });
+  });
 
   const grid  = document.getElementById("grid");
   const count = document.getElementById("count");
   const lb    = document.getElementById("lb");
 
-  if (ids.length === 0) {
+  if (specs.length === 0) {
     grid.innerHTML = '<div class="empty">표시할 이미지가 없습니다.</div>';
   } else {
-    count.textContent = "(총 " + ids.length + "장)";
-    for (const id of ids) {
-      const src = BASE + fold + "/" + user + "_" + id + ".jpg";
+    count.textContent = "(총 " + specs.length + "장)";
+    for (const s of specs) {
       const img = new Image();
-      img.src = src;
+      img.src = s.src;
       img.loading = "lazy";
-      img.alt = id;
-      img.onclick = () => { lb.querySelector("img").src = src; lb.classList.add("open"); };
+      img.alt = s.label;
+      img.onclick = () => { lb.querySelector("img").src = s.src; lb.classList.add("open"); };
+      img.onerror = () => { img.classList.add("fail"); };
       grid.appendChild(img);
     }
   }
