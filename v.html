@@ -22,50 +22,78 @@
 <div class="grid" id="grid"></div>
 <div id="lb" onclick="this.classList.remove('open')"><img alt=""></div>
 <script>
-  // URL 형식 (v4):
-  //   ?u=u0[,u1...]&f=FOLDER&it=IT0[,IT1...]#group0[;group1...]
-  //     - 그룹 i 는 user[i] + it[i] 사용
-  //     - it[i] 가 없거나 빈 문자열이면 그룹 i 의 ID는 it_code 미적용
-  //     - it 쿼리에 하나만 있으면 모든 그룹이 그 값 공유 (기존 호환)
-  //     - 각 아이템이 숫자만(\d+)이고 it[i] 가 있으면 → {user}_{it}_{id}.jpg
-  //     - 그 외(input_xxx, IT_xxx 등) → {user}_{id}.jpg
+  // URL 형식 (v5):
+  //   1) 컴팩트 모드 (짧은 URL):
+  //      ?it=IT0[,IT1...]    ← fragment 없음
+  //      → data/{IT}.json 을 가져와 렌더
+  //   2) 인라인 모드 (기존 호환):
+  //      ?u=u0[,u1..]&f=F&it=IT0[,IT1..]#group0[;group1..]
+  //      → fragment의 ID들을 user[i]+it[i] 로 확장
 
   const BASE = "https://quickstar.co.kr/data/member/";
   const url = new URL(location.href);
-  const users   = (url.searchParams.get("u") || "handuscorp2").split(",").map(s => s.trim());
-  const folder  = url.searchParams.get("f") || "ha";
-  const itCodes = (url.searchParams.get("it") || "").split(",").map(s => s.trim());
-  const rawHash = decodeURIComponent(location.hash.slice(1));
-  const groups  = rawHash ? rawHash.split(";") : [];
-
-  const pickAt = (arr, i, fallback) => {
-    if (arr[i] !== undefined) return arr[i];
-    if (arr.length === 1) return arr[0]; // 단일값 → 모든 그룹 공유 (기존 호환)
-    return fallback;
-  };
-
-  const specs = [];
-  groups.forEach((g, gi) => {
-    const u  = pickAt(users, gi, users[0] || "");
-    const it = pickAt(itCodes, gi, "");
-    g.split(",").map(s => s.trim()).filter(Boolean).forEach(id => {
-      let filename;
-      if (/^\d+$/.test(id) && it) {
-        filename = u + "_" + it + "_" + id + ".jpg";
-      } else {
-        filename = u + "_" + id + ".jpg";
-      }
-      specs.push({ src: BASE + folder + "/" + filename, label: id });
-    });
-  });
+  const usersQ   = (url.searchParams.get("u") || "").split(",").map(s => s.trim()).filter(Boolean);
+  const folderQ  = url.searchParams.get("f") || "ha";
+  const itCodesQ = (url.searchParams.get("it") || "").split(",").map(s => s.trim()).filter(Boolean);
+  const rawHash  = decodeURIComponent(location.hash.slice(1));
 
   const grid  = document.getElementById("grid");
   const count = document.getElementById("count");
   const lb    = document.getElementById("lb");
 
-  if (specs.length === 0) {
-    grid.innerHTML = '<div class="empty">표시할 이미지가 없습니다.</div>';
-  } else {
+  const pickAt = (arr, i, fb) => {
+    if (arr[i] !== undefined) return arr[i];
+    if (arr.length === 1) return arr[0];
+    return fb;
+  };
+
+  function buildFilename(user, it, id) {
+    if (/^\d+$/.test(id) && it) return user + "_" + it + "_" + id + ".jpg";
+    return user + "_" + id + ".jpg";
+  }
+
+  async function gatherSpecs() {
+    const specs = [];
+
+    // 컴팩트 모드: fragment 없고 it 만 있을 때
+    if (!rawHash && itCodesQ.length) {
+      const datas = await Promise.all(itCodesQ.map(it =>
+        fetch("data/" + encodeURIComponent(it) + ".json", { cache: "no-cache" })
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null)
+      ));
+      datas.forEach(data => {
+        if (!data) return;
+        const f  = data.f  || folderQ;
+        const it = data.it || "";
+        for (const grp of (data.g || [])) {
+          const u = grp.u;
+          for (const id of (grp.ids || [])) {
+            specs.push({ src: BASE + f + "/" + buildFilename(u, it, id), label: id });
+          }
+        }
+      });
+      return specs;
+    }
+
+    // 인라인 모드 (기존)
+    const users  = usersQ.length ? usersQ : ["handuscorp2"];
+    const groups = rawHash ? rawHash.split(";") : [];
+    groups.forEach((g, gi) => {
+      const u  = pickAt(users, gi, users[0]);
+      const it = pickAt(itCodesQ, gi, "");
+      g.split(",").map(s => s.trim()).filter(Boolean).forEach(id => {
+        specs.push({ src: BASE + folderQ + "/" + buildFilename(u, it, id), label: id });
+      });
+    });
+    return specs;
+  }
+
+  function render(specs) {
+    if (!specs.length) {
+      grid.innerHTML = '<div class="empty">표시할 이미지가 없습니다.</div>';
+      return;
+    }
     count.textContent = "(총 " + specs.length + "장)";
     for (const s of specs) {
       const img = new Image();
@@ -77,6 +105,11 @@
       grid.appendChild(img);
     }
   }
+
+  gatherSpecs().then(render).catch(e => {
+    console.error(e);
+    grid.innerHTML = '<div class="empty">로딩 중 오류가 발생했습니다.</div>';
+  });
 </script>
 </body>
 </html>
