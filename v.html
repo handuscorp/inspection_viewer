@@ -22,28 +22,36 @@
 <div class="grid" id="grid"></div>
 <div id="lb" onclick="this.classList.remove('open')"><img alt=""></div>
 <script>
-  // URL 형식 (v3):
-  //   ?u=USER[,ALT_USER...]&f=FOLDER&it=IT_CODE#group0[;group1...]
-  //     - group i 의 아이템들은 user[i] 사용 (없으면 user[0])
-  //     - 각 아이템이 숫자만(\d+)이고 it 가 있으면 → {user}_{it}_{id}.jpg
+  // URL 형식 (v4):
+  //   ?u=u0[,u1...]&f=FOLDER&it=IT0[,IT1...]#group0[;group1...]
+  //     - 그룹 i 는 user[i] + it[i] 사용
+  //     - it[i] 가 없거나 빈 문자열이면 그룹 i 의 ID는 it_code 미적용
+  //     - it 쿼리에 하나만 있으면 모든 그룹이 그 값 공유 (기존 호환)
+  //     - 각 아이템이 숫자만(\d+)이고 it[i] 가 있으면 → {user}_{it}_{id}.jpg
   //     - 그 외(input_xxx, IT_xxx 등) → {user}_{id}.jpg
-  // 기존 형식(?u=USER&f=FOLDER#id1,id2)도 그대로 동작.
 
   const BASE = "https://quickstar.co.kr/data/member/";
   const url = new URL(location.href);
-  const users  = (url.searchParams.get("u") || "handuscorp2").split(",").map(s => s.trim()).filter(Boolean);
-  const folder = url.searchParams.get("f") || "ha";
-  const itCode = url.searchParams.get("it") || "";
+  const users   = (url.searchParams.get("u") || "handuscorp2").split(",").map(s => s.trim());
+  const folder  = url.searchParams.get("f") || "ha";
+  const itCodes = (url.searchParams.get("it") || "").split(",").map(s => s.trim());
   const rawHash = decodeURIComponent(location.hash.slice(1));
-  const groups = rawHash ? rawHash.split(";") : [];
+  const groups  = rawHash ? rawHash.split(";") : [];
+
+  const pickAt = (arr, i, fallback) => {
+    if (arr[i] !== undefined) return arr[i];
+    if (arr.length === 1) return arr[0]; // 단일값 → 모든 그룹 공유 (기존 호환)
+    return fallback;
+  };
 
   const specs = [];
   groups.forEach((g, gi) => {
-    const u = users[gi] || users[0];
+    const u  = pickAt(users, gi, users[0] || "");
+    const it = pickAt(itCodes, gi, "");
     g.split(",").map(s => s.trim()).filter(Boolean).forEach(id => {
       let filename;
-      if (/^\d+$/.test(id) && itCode) {
-        filename = u + "_" + itCode + "_" + id + ".jpg";
+      if (/^\d+$/.test(id) && it) {
+        filename = u + "_" + it + "_" + id + ".jpg";
       } else {
         filename = u + "_" + id + ".jpg";
       }
